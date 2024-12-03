@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:pedometer/pedometer.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 void main() {
   // Initialize port for communication between TaskHandler and UI.
@@ -16,28 +18,88 @@ void startCallback() {
   FlutterForegroundTask.setTaskHandler(MyTaskHandler());
 }
 
+class TheWalk {
+  late Stream<StepCount> _stepCountStream;
+  late Stream<PedestrianStatus> _pedestrianStatusStream;
+  String _status = '?', _steps = '?';
+
+  void onStepCount(StepCount event) {
+    print(event);
+    _steps = event.steps.toString();
+  }
+
+  void onPedestrianStatusChanged(PedestrianStatus event) {
+    print(event);
+    _status = event.status;
+  }
+
+  void onPedestrianStatusError(error) {
+    print('onPedestrianStatusError: $error');
+    _status = 'Pedestrian Status not available';
+    print(_status);
+  }
+
+  void onStepCountError(error) {
+    print('onStepCountError: $error');
+    _steps = 'Step Count not available';
+  }
+
+  Future<bool> checkActivityRecognitionPermission() async {
+    bool granted = await Permission.activityRecognition.isGranted;
+
+    if (!granted) {
+      granted = await Permission.activityRecognition.request() ==
+          PermissionStatus.granted;
+    }
+
+    return granted;
+  }
+
+  Future<void> initPlatformState() async {
+
+    _pedestrianStatusStream = Pedometer.pedestrianStatusStream;
+    (await _pedestrianStatusStream.listen(onPedestrianStatusChanged))
+        .onError(onPedestrianStatusError);
+
+    _stepCountStream = Pedometer.stepCountStream;
+    _stepCountStream.listen(onStepCount).onError(onStepCountError);
+
+  }
+}
+
 class MyTaskHandler extends TaskHandler {
   static const String incrementCountCommand = 'incrementCount';
+  final TheStep = TheWalk();
 
   int _count = 0;
 
   void _incrementCount() {
-    _count++;
+    // _count++;
+    //
+    // // Update notification content.
+    // FlutterForegroundTask.updateService(
+    //   notificationTitle: 'Hello MyTaskHandler :)',
+    //   notificationText: 'count: $_count',
+    // );
+    //
+    // // Send data to main isolate.
+    // FlutterForegroundTask.sendDataToMain(_count);
 
     // Update notification content.
     FlutterForegroundTask.updateService(
       notificationTitle: 'Hello MyTaskHandler :)',
-      notificationText: 'count: $_count',
+      notificationText: 'steps: ${TheStep._steps}',
     );
 
     // Send data to main isolate.
-    FlutterForegroundTask.sendDataToMain(_count);
+    FlutterForegroundTask.sendDataToMain(TheStep._steps);
   }
 
   // Called when the task is started.
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
     print('onStart(starter: ${starter.name})');
+    TheStep.initPlatformState();
     _incrementCount();
   }
 
@@ -88,7 +150,7 @@ class ExampleApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       routes: {
-        '/': (context) => const ExamplePage(),
+        '/': (context) =>  const ExamplePage(),
         '/second': (context) => const SecondPage(),
       },
       initialRoute: '/',
@@ -97,6 +159,7 @@ class ExampleApp extends StatelessWidget {
 }
 
 class ExamplePage extends StatefulWidget {
+
   const ExamplePage({super.key});
 
   @override
@@ -105,6 +168,7 @@ class ExamplePage extends StatefulWidget {
 
 class _ExamplePageState extends State<ExamplePage> {
   final ValueNotifier<Object?> _taskDataListenable = ValueNotifier(null);
+  final TheStep = TheWalk();
 
   Future<void> _requestPermissions() async {
     // Android 13+, you need to allow notification permission to display foreground service notification.
@@ -115,6 +179,8 @@ class _ExamplePageState extends State<ExamplePage> {
     if (notificationPermission != NotificationPermission.granted) {
       await FlutterForegroundTask.requestNotificationPermission();
     }
+
+    TheStep.checkActivityRecognitionPermission();
 
     if (Platform.isAndroid) {
       // Android 12+, there are restrictions on starting a foreground service.
